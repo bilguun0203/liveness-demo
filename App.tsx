@@ -1,118 +1,374 @@
-/**
- * Sample React Native App
- * https://github.com/facebook/react-native
- *
- * @format
- */
-
-import React from 'react';
-import type {PropsWithChildren} from 'react';
+import { useEffect, useState } from 'react';
+import { Dimensions, StyleSheet, Text, View } from 'react-native';
 import {
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  useColorScheme,
-  View,
-} from 'react-native';
-
+  useLivenessPlugin,
+  type LivenessResponse,
+} from '@bilguun0203/react-native-liveness-detector';
 import {
-  Colors,
-  DebugInstructions,
-  Header,
-  LearnMoreLinks,
-  ReloadInstructions,
-} from 'react-native/Libraries/NewAppScreen';
+  Camera,
+  runAsync,
+  useCameraDevice,
+  useCameraFormat,
+  useCameraPermission,
+  useFrameProcessor,
+} from 'react-native-vision-camera';
+import { useRunOnJS } from 'react-native-worklets-core';
 
-type SectionProps = PropsWithChildren<{
-  title: string;
-}>;
+export default function App() {
+  const windowWidth = Dimensions.get('window').width;
+  const windowHeight = Dimensions.get('window').height;
+  const device = useCameraDevice('front');
+  const { hasPermission, requestPermission } = useCameraPermission();
+  const [permReqRes, setPermReqRes] = useState<boolean>(hasPermission);
+  const [livenessResponse, setLivenessResponse] =
+    useState<LivenessResponse | null>(null);
+  const format = useCameraFormat(device, [
+    { videoResolution: { width: 1280, height: 720 } },
+    { fps: 10 },
+  ]);
 
-function Section({children, title}: SectionProps): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
-  return (
-    <View style={styles.sectionContainer}>
-      <Text
-        style={[
-          styles.sectionTitle,
-          {
-            color: isDarkMode ? Colors.white : Colors.black,
-          },
-        ]}>
-        {title}
-      </Text>
-      <Text
-        style={[
-          styles.sectionDescription,
-          {
-            color: isDarkMode ? Colors.light : Colors.dark,
-          },
-        ]}>
-        {children}
-      </Text>
-    </View>
+  const plugin = useLivenessPlugin();
+
+  useEffect(() => {
+    if (!hasPermission) {
+      const perm = async () => {
+        setPermReqRes(await requestPermission());
+      };
+      perm();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const livenessOnResult = useRunOnJS((result: LivenessResponse) => {
+    if (result.face != null) {
+      setLivenessResponse(result);
+    } else {
+      setLivenessResponse(null);
+    }
+  }, []);
+
+  const frameProcessor = useFrameProcessor(
+    (frame) => {
+      'worklet';
+      runAsync(frame, () => {
+        'worklet';
+        const result = plugin.liveness(frame);
+        livenessOnResult(result);
+      });
+    },
+    [livenessOnResult]
   );
-}
 
-function App(): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
+  const faceLeft = livenessResponse?.face
+    ? (livenessResponse.face.left / 720) * windowWidth
+    : 0;
+  const faceRight = livenessResponse?.face
+    ? (livenessResponse.face.right / 720) * windowWidth
+    : 0;
+  const faceTop = livenessResponse?.face
+    ? (livenessResponse.face.top / 1280) * windowHeight
+    : 0;
+  const faceBottom = livenessResponse?.face
+    ? (livenessResponse.face.bottom / 1280) * windowHeight
+    : 0;
+  const faceWidth = faceRight - faceLeft;
+  const faceHeight = faceBottom - faceTop;
 
-  const backgroundStyle = {
-    backgroundColor: isDarkMode ? Colors.darker : Colors.lighter,
-  };
-
+  if (!hasPermission && !permReqRes)
+    return (
+      <View style={styles.container}>
+        <Text>No camera permission</Text>
+      </View>
+    );
+  if (device == null)
+    return (
+      <View style={styles.container}>
+        <Text>No camera</Text>
+      </View>
+    );
   return (
-    <SafeAreaView style={backgroundStyle}>
-      <StatusBar
-        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
-        backgroundColor={backgroundStyle.backgroundColor}
+    <>
+      <Camera
+        style={StyleSheet.absoluteFill}
+        device={device}
+        isActive={true}
+        format={format}
+        pixelFormat="yuv"
+        frameProcessor={frameProcessor}
+        enableFpsGraph={true}
       />
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        style={backgroundStyle}>
-        <Header />
-        <View
-          style={{
-            backgroundColor: isDarkMode ? Colors.black : Colors.white,
-          }}>
-          <Section title="Step One">
-            Edit <Text style={styles.highlight}>App.tsx</Text> to change this
-            screen and then come back to see your edits.
-          </Section>
-          <Section title="See Your Changes">
-            <ReloadInstructions />
-          </Section>
-          <Section title="Debug">
-            <DebugInstructions />
-          </Section>
-          <Section title="Learn More">
-            Read the docs to discover what to do next:
-          </Section>
-          <LearnMoreLinks />
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+      {livenessResponse != null && (
+        <>
+          <Text
+            style={{
+              position: 'absolute',
+              bottom: 0,
+              backgroundColor: '#fff',
+              paddingHorizontal: 16,
+            }}
+          >
+            Left: {livenessResponse.face?.left + '\n'}
+            Top: {livenessResponse.face?.top + '\n'}
+            Right: {livenessResponse.face?.right + '\n'}
+            Bottom: {livenessResponse.face?.bottom + '\n'}
+            score: {livenessResponse.score + '\n'}
+            yaw: {livenessResponse.rotation?.yaw + '\n'}
+            roll: {livenessResponse.rotation?.roll + '\n'}
+            pitch: {livenessResponse.rotation?.pitch + '\n'}
+            mouthOpen: {livenessResponse.features.isMouthOpen + '\n'}
+            leftEyeOpen: {livenessResponse.features.isLeftEyeOpen + '\n'}
+            rightEyeOpen: {livenessResponse.features.isRightEyeOpen + '\n'}
+            horizontalRotation:{' '}
+            {livenessResponse.features.horizontalRotation + '\n'}
+            verticalRotation:{' '}
+            {livenessResponse.features.verticalRotation + '\n'}
+            mouthArea: {livenessResponse.landmarks?.mouthArea + '\n'}
+            leftEyeArea: {livenessResponse.landmarks?.leftEyeArea + '\n'}
+            rightEyeArea: {livenessResponse.landmarks?.rightEyeArea + '\n'}
+          </Text>
+          {livenessResponse.face && livenessResponse.landmarks && (
+            <>
+              <View
+                style={{
+                  position: 'absolute',
+                  left:
+                    faceLeft +
+                    (livenessResponse.landmarks.noseTip[0] ?? 0) * faceWidth -
+                    2,
+                  top:
+                    faceTop +
+                    (livenessResponse.landmarks.noseTip[1] ?? 0) * faceHeight -
+                    2,
+                  width: 5,
+                  height: 5,
+                  borderWidth: 1,
+                  borderColor: 'red',
+                  borderRadius: 999,
+                }}
+              />
+              <View
+                style={{
+                  position: 'absolute',
+                  left:
+                    faceLeft +
+                    (livenessResponse.landmarks.lipsTop[0] ?? 0) * faceWidth -
+                    2,
+                  top:
+                    faceTop +
+                    (livenessResponse.landmarks.lipsTop[1] ?? 0) * faceHeight -
+                    2,
+                  width: 5,
+                  height: 5,
+                  borderWidth: 1,
+                  borderColor: 'red',
+                  borderRadius: 999,
+                }}
+              />
+              <View
+                style={{
+                  position: 'absolute',
+                  left:
+                    faceLeft +
+                    (livenessResponse.landmarks.lipsBottom[0] ?? 0) *
+                    faceWidth -
+                    2,
+                  top:
+                    faceTop +
+                    (livenessResponse.landmarks.lipsBottom[1] ?? 0) *
+                    faceHeight -
+                    2,
+                  width: 5,
+                  height: 5,
+                  borderWidth: 1,
+                  borderColor: 'red',
+                  borderRadius: 999,
+                }}
+              />
+              <View
+                style={{
+                  position: 'absolute',
+                  left:
+                    faceLeft +
+                    (livenessResponse.landmarks.leftEyeTop[0] ?? 0) *
+                    faceWidth -
+                    2,
+                  top:
+                    faceTop +
+                    (livenessResponse.landmarks.leftEyeTop[1] ?? 0) *
+                    faceHeight -
+                    2,
+                  width: 5,
+                  height: 5,
+                  borderWidth: 1,
+                  borderColor: 'red',
+                  borderRadius: 999,
+                }}
+              />
+              <View
+                style={{
+                  position: 'absolute',
+                  left:
+                    faceLeft +
+                    (livenessResponse.landmarks.leftEyeBottom[0] ?? 0) *
+                    faceWidth -
+                    2,
+                  top:
+                    faceTop +
+                    (livenessResponse.landmarks.leftEyeBottom[1] ?? 0) *
+                    faceHeight -
+                    2,
+                  width: 5,
+                  height: 5,
+                  borderWidth: 1,
+                  borderColor: 'red',
+                  borderRadius: 999,
+                }}
+              />
+              <View
+                style={{
+                  position: 'absolute',
+                  left:
+                    faceLeft +
+                    (livenessResponse.landmarks.rightEyeTop[0] ?? 0) *
+                    faceWidth -
+                    2,
+                  top:
+                    faceTop +
+                    (livenessResponse.landmarks.rightEyeTop[1] ?? 0) *
+                    faceHeight -
+                    2,
+                  width: 5,
+                  height: 5,
+                  borderWidth: 1,
+                  borderColor: 'red',
+                  borderRadius: 999,
+                }}
+              />
+              <View
+                style={{
+                  position: 'absolute',
+                  left:
+                    faceLeft +
+                    (livenessResponse.landmarks.rightEyeBottom[0] ?? 0) *
+                    faceWidth -
+                    2,
+                  top:
+                    faceTop +
+                    (livenessResponse.landmarks.rightEyeBottom[1] ?? 0) *
+                    faceHeight -
+                    2,
+                  width: 5,
+                  height: 5,
+                  borderWidth: 1,
+                  borderColor: 'red',
+                  borderRadius: 999,
+                }}
+              />
+            </>
+          )}
+          {livenessResponse.face &&
+            livenessResponse.landmarks &&
+            livenessResponse.rotation && (
+              <View
+                style={{
+                  position: 'absolute',
+                  left:
+                    faceLeft +
+                    (livenessResponse.landmarks.noseTip[0] ?? 0) * faceWidth -
+                    25,
+                  top:
+                    faceTop +
+                    (livenessResponse.landmarks.noseTip[1] ?? 0) * faceWidth,
+                  width: 50,
+                  height: 6,
+                  backgroundColor: 'red',
+                  transform: [
+                    { rotateX: `${livenessResponse.rotation.pitch}deg` },
+                    { rotateY: `${livenessResponse.rotation.roll}deg` },
+                    { rotateZ: `${90 - livenessResponse.rotation.yaw}deg` },
+                  ],
+                }}
+              />
+            )}
+          {livenessResponse.face &&
+            livenessResponse.landmarks &&
+            livenessResponse.rotation && (
+              <View
+                style={{
+                  position: 'absolute',
+                  left:
+                    faceLeft +
+                    (livenessResponse.landmarks.noseTip[0] ?? 0) * faceWidth -
+                    25,
+                  top:
+                    faceTop +
+                    (livenessResponse.landmarks.noseTip[1] ?? 0) * faceWidth,
+                  width: 50,
+                  height: 6,
+                  backgroundColor: 'green',
+                  transform: [
+                    { rotateX: `${90 - livenessResponse.rotation.pitch}deg` },
+                    {
+                      rotateY: `${(livenessResponse.rotation.yaw + 90) * 3}deg`,
+                    },
+                    { rotateZ: `${livenessResponse.rotation.roll - 90}deg` },
+                  ],
+                }}
+              />
+            )}
+          {livenessResponse.face &&
+            livenessResponse.landmarks &&
+            livenessResponse.rotation && (
+              <View
+                style={{
+                  position: 'absolute',
+                  left:
+                    faceLeft +
+                    (livenessResponse.landmarks.noseTip[0] ?? 0) * faceWidth -
+                    3,
+                  top:
+                    faceTop +
+                    (livenessResponse.landmarks.noseTip[1] ?? 0) * faceWidth -
+                    22,
+                  width: 6,
+                  height: 50,
+                  backgroundColor: 'blue',
+                  transform: [
+                    { rotateX: `${livenessResponse.rotation.pitch}deg` },
+                    { rotateY: `${livenessResponse.rotation.roll}deg` },
+                    { rotateZ: `${90 - livenessResponse.rotation.yaw}deg` },
+                  ],
+                }}
+              />
+            )}
+
+          <View
+            style={{
+              position: 'absolute',
+              left: faceLeft,
+              top: faceTop,
+              width: faceWidth,
+              height: faceHeight,
+              borderWidth: 1,
+              borderColor: 'yellow',
+              borderRadius: faceHeight,
+            }}
+          />
+        </>
+      )}
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  sectionContainer: {
-    marginTop: 32,
-    paddingHorizontal: 24,
+  container: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  sectionTitle: {
-    fontSize: 24,
-    fontWeight: '600',
-  },
-  sectionDescription: {
-    marginTop: 8,
-    fontSize: 18,
-    fontWeight: '400',
-  },
-  highlight: {
-    fontWeight: '700',
+  box: {
+    width: 60,
+    height: 60,
+    marginVertical: 20,
   },
 });
-
-export default App;
