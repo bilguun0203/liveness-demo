@@ -3,7 +3,7 @@ import { Dimensions, StyleSheet, Text, View } from 'react-native';
 import {
   useLivenessPlugin,
   type LivenessResponse,
-} from '@bilguun0203/react-native-liveness-detector';
+} from '@airookies/react-native-liveness-detector';
 import {
   Camera,
   runAsync,
